@@ -1638,10 +1638,10 @@ function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show')
 /* ================= DROPBOX SYNC (only on her own website, not inside Claude) ================= */
 const inFrame=(()=>{ try{ return window.top!==window; }catch(e){ return true; } })();
 const DBX_OK=!inFrame && /^https?:$/.test(location.protocol) && !!(window.crypto&&crypto.subtle);
-const DBX={key:'', refresh:'', token:'', exp:0, rev:{}, busy:false, status:'', at:0, wait:false};
+const DBX={key:'usi47rshjmnhaap', refresh:'', token:'', exp:0, rev:{}, busy:false, status:'', at:0, wait:false};
 const SFILE='/schrijfbureau.json', LFILE='/writinglog.json';
 let dbxDirtyS=false, dbxDirtyL=false, dbxT=null;
-function dbxLoad(){ try{ const x=JSON.parse(localStorage.getItem('sb-dropbox')||'null'); if(x){ DBX.key=x.key||''; DBX.refresh=x.refresh||''; DBX.rev=x.rev||{}; DBX.synced=x.synced||0; } }catch(e){} }
+function dbxLoad(){ try{ const x=JSON.parse(localStorage.getItem('sb-dropbox')||'null'); if(x){ DBX.key=x.key||DBX.key; DBX.refresh=x.refresh||''; DBX.rev=x.rev||{}; DBX.synced=x.synced||0; } }catch(e){} }
 function dbxSave(){ try{ localStorage.setItem('sb-dropbox',JSON.stringify({key:DBX.key,refresh:DBX.refresh,rev:DBX.rev,synced:DBX.synced||0})); }catch(e){} }
 const dbxOn=()=>DBX_OK && !!DBX.refresh;
 const b64url=buf=>{ let s=''; new Uint8Array(buf).forEach(b=>s+=String.fromCharCode(b)); return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
