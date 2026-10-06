@@ -1638,7 +1638,7 @@ function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show')
 /* ================= DROPBOX SYNC (only on her own website, not inside Claude) ================= */
 const inFrame=(()=>{ try{ return window.top!==window; }catch(e){ return true; } })();
 const DBX_OK=!inFrame && /^https?:$/.test(location.protocol) && !!(window.crypto&&crypto.subtle);
-const DBX={key:'usi47rshjmnhaap', refresh:'', token:'', exp:0, rev:{}, busy:false, status:'', at:0, wait:false};
+const DBX={authUrl:'',key:'usi47rshjmnhaap', refresh:'', token:'', exp:0, rev:{}, busy:false, status:'', at:0, wait:false};
 const SFILE='/schrijfbureau.json', LFILE='/writinglog.json';
 let dbxDirtyS=false, dbxDirtyL=false, dbxT=null;
 function dbxLoad(){ try{ const x=JSON.parse(localStorage.getItem('sb-dropbox')||'null'); if(x){ DBX.key=x.key||DBX.key; DBX.refresh=x.refresh||''; DBX.rev=x.rev||{}; DBX.synced=x.synced||0; } }catch(e){} }
@@ -1649,14 +1649,13 @@ const hdr=o=>JSON.stringify(o).replace(/[\u007f-￿]/g,c=>'\\u'+('000'+c.charCod
 function setDbx(msg){ DBX.status=msg; if(folioView==='projects') renderFolio(); }
 function dbxErr(e){ return e&&e.auth ? 'Dropbox asks you to connect again' : 'Could not reach Dropbox. Your work is safe here and will sync later'; }
 
-async function dbxStartConnect(key){
-  DBX.key=key.trim(); if(!DBX.key){ toast('Paste your app key first'); return; }
-  const v=b64url(crypto.getRandomValues(new Uint8Array(48)));
-  try{ localStorage.setItem('sb-pkce',v); }catch(e){}
+async function dbxPrep(){
+  if(!DBX_OK || dbxOn() || !DBX.key) return;
+  let v=''; try{ v=localStorage.getItem('sb-pkce')||''; }catch(e){}
+  if(!v){ v=b64url(crypto.getRandomValues(new Uint8Array(48))); try{ localStorage.setItem('sb-pkce',v); }catch(e){} }
   const ch=b64url(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)));
-  const u='https://www.dropbox.com/oauth2/authorize?'+new URLSearchParams({client_id:DBX.key,response_type:'code',code_challenge:ch,code_challenge_method:'S256',token_access_type:'offline'});
-  dbxSave(); DBX.wait=true; renderFolio();
-  window.open(u,'_blank');
+  DBX.authUrl='https://www.dropbox.com/oauth2/authorize?'+new URLSearchParams({client_id:DBX.key,response_type:'code',code_challenge:ch,code_challenge_method:'S256',token_access_type:'offline'});
+  if(folioView==='projects') renderFolio();
 }
 async function dbxFinish(code){
   code=(code||'').trim(); let v=''; try{ v=localStorage.getItem('sb-pkce')||''; }catch(e){}
@@ -1665,11 +1664,11 @@ async function dbxFinish(code){
     const r=await fetch('https://api.dropboxapi.com/oauth2/token',{method:'POST',body:new URLSearchParams({code,grant_type:'authorization_code',code_verifier:v,client_id:DBX.key})});
     if(!r.ok) throw 0; const j=await r.json();
     DBX.refresh=j.refresh_token; DBX.token=j.access_token; DBX.exp=Date.now()+(j.expires_in||3600)*1000; DBX.rev={}; DBX.wait=false;
-    try{ localStorage.removeItem('sb-pkce'); }catch(e){}
+    try{ localStorage.removeItem('sb-pkce'); }catch(e){} DBX.authUrl='';
     dbxSave(); toast('Dropbox is connected'); await dbxSyncAll(); renderFolio();
-  }catch(e){ toast('That code did not work. Try connecting again'); }
+  }catch(e){ try{ localStorage.removeItem('sb-pkce'); }catch(x){} DBX.authUrl=''; dbxPrep(); toast('That code did not work. Tap Connect Dropbox again for a new code'); }
 }
-function dbxDisconnect(){ DBX.refresh=''; DBX.token=''; DBX.rev={}; DBX.wait=false; dbxSave(); if(LOG) LOG.setSync('local'); setDbx(''); toast('Dropbox is disconnected. Everything stays on this device'); }
+function dbxDisconnect(){ DBX.refresh=''; DBX.token=''; DBX.rev={}; DBX.wait=false; dbxSave(); dbxPrep(); if(LOG) LOG.setSync('local'); setDbx(''); toast('Dropbox is disconnected. Everything stays on this device'); }
 async function dbxTok(){
   if(DBX.token && Date.now()<DBX.exp-60000) return DBX.token;
   const r=await fetch('https://api.dropboxapi.com/oauth2/token',{method:'POST',body:new URLSearchParams({grant_type:'refresh_token',refresh_token:DBX.refresh,client_id:DBX.key})});
@@ -1781,7 +1780,7 @@ async function dbxCheck(){
 setInterval(dbxCheck,45000);
 document.addEventListener('visibilitychange',()=>{ if(!dbxOn()) return; if(document.visibilityState==='visible') dbxCheck(); else if(dbxDirtyS||dbxDirtyL) dbxSyncAll(); });
 window.addEventListener('online',()=>dbxCheck());
-async function dbxStartup(){ dbxLoad(); if(!dbxOn()) return; try{ await Promise.race([dbxSyncAll(), new Promise(r=>setTimeout(r,8000))]); }catch(e){} }
+async function dbxStartup(){ dbxLoad(); if(!dbxOn()){ dbxPrep(); return; } try{ await Promise.race([dbxSyncAll(), new Promise(r=>setTimeout(r,8000))]); }catch(e){} }
 
 function dropboxSection(){
   let h=`<div class="group">Dropbox</div>`;
@@ -1791,13 +1790,15 @@ function dropboxSection(){
       <div class="row"><button class="fbtn strong" id="dbx-now">Sync now</button><button class="fbtn" id="dbx-off">Disconnect</button></div>`;
     return h;
   }
-  h+=`<p class="more" style="margin-bottom:.5rem">Connect your own Dropbox so your iPad and iMac share one notebook. Paste the app key from your Dropbox app, connect, and copy the code Dropbox shows you back in here.</p>
-    <div class="drow"><input id="dbx-key" placeholder="App key" value="${esc(DBX.key)}" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="fbtn strong" id="dbx-go">Connect Dropbox</button></div>`;
-  if(DBX.wait||DBX.key) h+=`<div class="drow"><input id="dbx-code" placeholder="Code from Dropbox" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="fbtn" id="dbx-fin">Finish</button></div>`;
+  h+=`<p class="more" style="margin-bottom:.5rem">Connect your own Dropbox so your iPad and iMac share one notebook. Tap Connect Dropbox, tap Allow, copy the code Dropbox shows you, and paste it in here.</p>
+    <div class="row" style="margin-bottom:.5rem">${DBX.authUrl?`<a class="fbtn strong" id="dbx-go" href="${esc(DBX.authUrl)}" target="_blank" rel="noopener" style="text-decoration:none;display:inline-block">Connect Dropbox</a>`:`<button class="fbtn" disabled>Getting ready…</button>`}</div>
+    <div class="drow"><input id="dbx-code" placeholder="Code from Dropbox" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="fbtn strong" id="dbx-fin">Finish</button></div>
+    <details style="margin-top:.4rem"><summary class="more" style="cursor:pointer">App key</summary><div class="drow"><input id="dbx-key" value="${esc(DBX.key)}" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="App key"></div></details>`;
   return h;
 }
 function bindDropbox(body){
-  const go=body.querySelector('#dbx-go'); if(go) go.onclick=()=>dbxStartConnect(body.querySelector('#dbx-key').value);
+  const go=body.querySelector('#dbx-go'); if(go) go.onclick=()=>{ DBX.wait=true; };
+  const ky=body.querySelector('#dbx-key'); if(ky) ky.onchange=()=>{ const v=ky.value.trim(); if(v&&v!==DBX.key){ DBX.key=v; dbxSave(); try{ localStorage.removeItem('sb-pkce'); }catch(e){} DBX.authUrl=''; dbxPrep(); } };
   const fin=body.querySelector('#dbx-fin'); if(fin) fin.onclick=()=>dbxFinish(body.querySelector('#dbx-code').value);
   const now=body.querySelector('#dbx-now'); if(now) now.onclick=()=>{ dbxDirtyS=true; dbxDirtyL=true; dbxSyncAll(); };
   const off=body.querySelector('#dbx-off'); if(off) off.onclick=async()=>{ if(await ask('Disconnect Dropbox? Your work stays on this device and in your Dropbox, it just stops syncing.','Disconnect')) dbxDisconnect(); };
