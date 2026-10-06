@@ -280,6 +280,23 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
 .epaper .chg.cur{outline:2px solid rgba(160,100,63,.65);outline-offset:2px}
 .ehead{font:.78rem var(--ui-font);color:#7c6f5e;margin-bottom:1.3rem;display:flex;gap:.9rem;flex-wrap:wrap}
 #read-views .pbtn.on{background:var(--ink);color:var(--paper)}
+.app{grid-template-columns:minmax(0,1fr)}
+.barctl{display:contents}
+.side-close{display:none}
+@media (max-width: 1100px){
+  .side-close{display:grid;place-items:center;position:absolute;right:12px;top:46px;z-index:4;width:30px;height:30px;border-radius:50%;border:0;background:rgba(42,35,27,.08);color:var(--ink);font-size:1.05rem;line-height:1}
+}
+@media (max-width: 560px){
+  html,body{overflow-x:hidden}
+  .bar{flex-wrap:wrap;row-gap:.55rem}
+  .title-input{flex:1 1 auto;min-width:0;max-width:none;font-size:1.2rem}
+  .barctl{display:flex;flex:1 1 100%;gap:.45rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:0 -.8rem;padding:0 .8rem 3px;align-items:center}
+  .barctl::-webkit-scrollbar{display:none}
+  .barctl>*{flex:0 0 auto}
+  .side{left:.5rem;right:.5rem;width:auto!important;top:calc(env(safe-area-inset-top,0px) + 6.4rem)}
+  .head{gap:.35rem}
+  .editor{font-size:1.05rem;padding:.8rem 1.1rem 45vh}
+}
 @media (max-width: 1100px){
   .side{position:fixed;right:.8rem;top:calc(env(safe-area-inset-top,0px) + 4.4rem);bottom:calc(env(safe-area-inset-bottom,0px) + .6rem);width:min(340px,88vw);z-index:12;height:auto;transform:none;transition:transform .45s var(--ease),opacity .3s}
   .side.closed{transform:translateX(110%);margin-left:0;flex-basis:auto}
@@ -304,6 +321,7 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
   <header class="bar">
     <input class="title-input" id="title" aria-label="Story title" spellcheck="false">
     <span class="saved" id="saved">Saved</span>
+    <div class="barctl">
     <div class="fmt" role="group" aria-label="Text formatting">
       <button class="keep" data-fmt="italic" title="Italic (Cmd/Ctrl+I)" aria-label="Italic"><i>I</i></button>
       <button class="keep" data-fmt="bold" title="Bold (Cmd/Ctrl+B)" aria-label="Bold"><b>B</b></button>
@@ -321,6 +339,7 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
     <button class="qbtn" id="open-log" aria-pressed="false" title="Sprint timer and your writing log">Log</button>
     <button class="qbtn" id="toggle-tw" aria-pressed="false" title="Keep the line you are typing in the middle of the page">Typewriter</button>
     <button class="qbtn" id="toggle-side" aria-pressed="true" title="Show or hide your small notebook">Notebook</button>
+    </div>
   </header>
 
   <main class="stage">
@@ -382,6 +401,7 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
     </div>
 
     <aside class="side" id="side" aria-label="Small notebook">
+      <button class="side-close" id="side-close" aria-label="Close the small notebook">×</button>
       <nav class="stabs" aria-label="Small notebook sections">
         <button class="stab" data-side="names">Names<span class="badge" id="b-names"></span></button>
         <button class="stab" data-side="drawer">Drawer<span class="badge" id="b-drawer"></span></button>
@@ -618,6 +638,18 @@ input[type=number],input[type=text],input[type=time],input[type=date],select,tex
 #modal .dialog{background:#f2eadb;border:0;border-radius:24px;box-shadow:0 40px 90px rgba(0,0,0,.5)}
 .cheer{background:#f2eadb;border-color:var(--accent)}
 .cheer small{color:#7c6f5e}
+.timecard{background:#f2eadb;border-radius:20px;box-shadow:0 18px 44px rgba(0,0,0,.35),0 3px 10px rgba(0,0,0,.2);padding:18px 20px 22px;margin-bottom:16px;--ink:#2a231b;--ink-2:#7c6f5e;--ink-3:#a0937f;--line:rgba(60,45,30,.13);color:var(--ink)}
+.timecard .daynav{margin-bottom:6px}
+.timecard .iconbtn{background:rgba(42,35,27,.07);color:var(--ink)}
+.timecard .ring .track{stroke:rgba(60,45,30,.12)}
+.timecard .preset{border-color:rgba(60,45,30,.18);color:#7c6f5e}
+.timecard .preset.on{color:#1c1814;border-color:var(--accent)}
+.timecard .spine.deco{background:rgba(60,45,30,.10)!important}
+.timecard .spine.add{border-color:#a0937f;color:#7c6f5e}
+.timecard .plank{background:rgba(60,45,30,.16)}
+.timecard .link{color:#a0643f}
+.timecard .panel{box-shadow:none;background:transparent;padding:0;margin:0}
+.timecard .hero{padding-bottom:0}
 @media (max-width:700px){nav.tabs{display:flex;border-radius:0;padding:4px 4px calc(4px + env(safe-area-inset-bottom,0px))}nav.tabs button.on{background:transparent;color:var(--ui);border-top:2px solid var(--accent)}}
 </style><div class="wl">
 <div class="shell">
@@ -1426,6 +1458,7 @@ $('#open-progress').onclick=()=>openFolio('progress');
 $('#open-projects').onclick=()=>openFolio('projects');
 document.querySelectorAll('.stab').forEach(t=>t.onclick=()=>{ if(sideView==='names' && t.dataset.side==='names' && !dock.list){ dock.list=true; } sideView=t.dataset.side; renderSide(); $('#side-body').scrollTop=0; });
 function applySide(){ const open=S.sideOpen!==false; $('#side').classList.toggle('closed',!open); $('#toggle-side').setAttribute('aria-pressed',String(open)); }
+$('#side-close').onclick=()=>{ S.sideOpen=false; applySide(); scheduleSave(); };
 $('#toggle-side').onclick=()=>{ S.sideOpen=S.sideOpen===false; applySide(); scheduleSave(); };
 function renderFolio(){ if(folioView) renderView(folioView,$('#folio-body')); }
 function renderSide(){
@@ -2514,14 +2547,14 @@ function fmtDate(ds){return parseISO(ds).toLocaleDateString(loc(),{weekday:'long
 
 function rToday(){
   const ds=view.date,isToday=ds===todayISO(),day=dayFor(ds),st=dayStats(day);
-  return`<div class="daynav">
+  const dn=`<div class="daynav">
     <button class="iconbtn" data-act="day-prev" aria-label="previous day">‹</button>
     <h2>${esc(fmtDate(ds))}</h2>
     <button class="iconbtn" data-act="day-next" aria-label="next day" ${isToday?'disabled':''}>›</button>
     ${isToday?'':`<button class="link" data-act="day-today">${t('backToday')}</button>`}
-  </div>
-  <div class="today-grid">
-    <div>${rTimer(day,isToday)}${rSprints(day,st)}${rWords(day)}</div>
+  </div>`;
+  return`<div class="today-grid">
+    <div><section class="timecard">${dn}${rTimer(day,isToday)}</section>${rSprints(day,st)}${rWords(day)}</div>
     <div>${rConditions(day)}</div>
   </div>`;
 }
@@ -3004,6 +3037,7 @@ return {
   if(!S || !Array.isArray(S.projects) || !S.projects.length){ const p=newProject('New story'); S={projects:[p], activeId:p.id}; }
   S.projects.forEach(upgrade);
   if(S.sideOpen===undefined) S.sideOpen = window.innerWidth>1100;
+  if(window.innerWidth<=560) S.sideOpen=false;
   if(!P()) S.activeId=S.projects[0].id;
   await dbxStartup();
   applySide(); applyTw(); loadProject();
