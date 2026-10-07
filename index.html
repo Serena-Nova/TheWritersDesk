@@ -282,6 +282,17 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
 #read-views .pbtn.on{background:var(--ink);color:var(--paper)}
 .app{grid-template-columns:minmax(0,1fr)}
 .barctl{display:contents}
+#confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60;display:none}
+.cheer{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 18px);transform:translate(-50%,-20px);opacity:0;z-index:61;pointer-events:none;background:var(--paper);color:var(--ink);border:2px solid var(--t-names);border-radius:22px;padding:.8rem 1.4rem;box-shadow:0 20px 50px rgba(0,0,0,.45);font:italic 500 1.12rem/1.35 var(--serif);text-align:center;max-width:calc(100% - 32px);transition:opacity .35s var(--ease),transform .45s var(--ease)}
+.cheer.show{opacity:1;transform:translate(-50%,0)}
+.cheer small{display:block;font:600 .78rem var(--ui-font);font-style:normal;color:var(--ink-soft);margin-top:.25rem}
+.grow{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 0;font-size:.82rem;color:var(--ink-soft)}
+.grow label{min-width:7.5rem;color:var(--ink);font-weight:500}
+.letter{font:1.06rem/1.7 var(--serif);color:var(--ink)}
+.letter p{margin:0 0 .8em}
+.letter b{font-weight:600}
+.letter .sign{font-style:italic;color:var(--ink-soft);margin-top:1.2em}
+.goal-in{width:6.5rem;border:0;border-radius:9px;background:rgba(42,35,27,.06);padding:.35rem .55rem;font:600 .95rem var(--ui-font);color:var(--ink)}
 .side-close{display:none}
 @media (max-width: 1100px){
   .side-close{display:grid;place-items:center;position:absolute;right:12px;top:46px;z-index:4;width:30px;height:30px;border-radius:50%;border:0;background:rgba(42,35,27,.08);color:var(--ink);font-size:1.05rem;line-height:1}
@@ -424,6 +435,8 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
   <div id="folio-body"></div>
 </aside>
 <div class="toast" id="toast" role="status"></div>
+<canvas id="confetti" aria-hidden="true"></canvas>
+<div class="cheer" id="cheer" role="status" aria-live="polite"></div>
 <div class="logsheet" id="logsheet" aria-hidden="true" inert role="dialog" aria-label="Writing log"><button class="log-close" id="log-close" aria-label="Close the writing log">×</button><div id="logbody"><div id="loghost"></div></div></div>
 <template id="logtpl"><style>
 :host{display:block;
@@ -765,6 +778,7 @@ function loadProject(){
   if(LOG) LOG.ensure(p.id,p.title);
   loadSnaps(p.id).then(()=>{ snapAt=0; snapshot(true); });
   loadEdoc(p.id).then(applyReadView);
+  setTimeout(initMiles,1600);
 }
 const paraStyle=()=>(P()&&P().paraStyle)||'indent';
 function applyParaStyle(){ for(const k of ['first','second']) eds[k].classList.toggle('indented', paraStyle()==='indent'); }
@@ -783,7 +797,7 @@ function applyMode(){
   $('#cut-first').hidden=rw;
   firstLocked = rw;
   setFirstEditable();
-  applyReadView(); markOpeners();
+  applyReadView(); markOpeners(); if(rw) checkMarks();
 }
 function setFirstEditable(){
   const rw=P().mode==='rewrite';
@@ -832,7 +846,7 @@ function switchSlot(k,id){
   if(p.slots[other]===id) p.slots[other]=p.slots[k];
   p.slots[k]=id;
   for(const s of ['first','second']){ eds[s].innerHTML=(slotDraft(s)||{}).html||''; last[s]=words(eds[s].innerText); }
-  renderDraftSelects(); refreshCounts(); renderTabs(); scanNames(); scheduleSave(); refreshPanels();
+  renderDraftSelects(); refreshCounts(); renderTabs(); scanNames(); scheduleSave(); refreshPanels(); checkMarks();
 }
 for(const k of ['first','second']) $('#sel-'+k).addEventListener('change',e=>{
   const v=e.target.value, p=P();
@@ -883,6 +897,7 @@ function track(k){
   if(d>0){
     const st=P().stats; st.total+=d; st.days[today()]=(st.days[today()]||0)+d;
     if(caretNearEnd(k)) st.forward+=d; else st.mid+=d;
+    checkGoals();
   }
   refreshCounts(); renderTabs(); if(folioView==='progress') renderFolio();
 }
@@ -964,7 +979,7 @@ function markRange(range, cls){
   });
   root.normalize();
   getSelection().removeAllRanges(); ranges.first=null;
-  scheduleSave(); renderTabs(); refreshPanels();
+  scheduleSave(); renderTabs(); refreshPanels(); checkMarks();
 }
 function applyMark(cls){
   const r=liveRange('first');
@@ -1411,7 +1426,7 @@ $('#note-next').onclick=()=>stepNote(1);
 $('#note-done').onclick=()=>{ if(edocOn()){ edDone(); return; }
   const r=P().read; if(!RD.cur||!r||!r.notes[RD.cur]){ stepNote(1); return; }
   r.notes[RD.cur].done=!r.notes[RD.cur].done; scheduleSave(); drawBands(); updateNoteNav(); refreshPanels();
-  if(r.notes[RD.cur].done){ const left=noteIds().filter(id=>!r.notes[id].done).length; toast(left?`${left} to go`:'Every note is done'); }
+  if(r.notes[RD.cur].done){ const left=noteIds().filter(id=>!r.notes[id].done).length; if(left) toast(`${left} to go`); else cheer('Every note from your read-through is worked through.','That was a big step for this book.',true); }
 };
 $('#zoom-in').onclick=()=>{ RD.zoom=Math.min(3,RD.zoom*1.25); const c=RD.cur; loadReadPdf().then(()=>c&&scrollPdfTo(c)); };
 $('#zoom-out').onclick=()=>{ RD.zoom=Math.max(.6,RD.zoom/1.25); const c=RD.cur; loadReadPdf().then(()=>c&&scrollPdfTo(c)); };
@@ -1520,7 +1535,9 @@ function renderView(folioView, body){
     const kw=p.knip.reduce((a,k)=>a+k.words,0);
     const f=words(eds.first.innerText), s=words(eds.second.innerText);
     h+=`<h2>Progress</h2><p class="intro">Everything here only goes up.</p>`;
-    h+=`<div class="stat"><div class="k">Written today</div><span class="big">${fmt(td)}</span></div>`;
+    h+=goalStat();
+    h+=lengthStat(p);
+    h+=`<div class="stat"><div class="k">Written today for ${esc(p.title)}</div><span class="big">${fmt(td)}</span></div>`;
     h+=`<div class="stat"><div class="k">Written for ${esc(p.title)}</div><span class="big">${fmt(st.total)}</span><div class="s">${fmt(st.forward)} words written moving forward and ${fmt(st.mid)} words shaped along the way.</div></div>`;
     h+=`<div class="stat"><div class="k">In your clippings</div><span class="big">${fmt(kw)}</span><div class="s">Words you wrote to find the story.</div></div>`;
     if(p.read && p.read.annotated){ const ids=p.read.order.filter(id=>p.read.notes[id]&&p.read.notes[id].ink>=60), dn=ids.filter(id=>p.read.notes[id].done).length;
@@ -1536,6 +1553,8 @@ function renderView(folioView, body){
         ${(g>0 && s>g)?`<div class="bonus">${esc(draftName('second'))} already has ${fmt(s-g)} more words than you've processed. The story is getting richer.</div>`:''}</div>`;
     }
     h+=progressExtra(p);
+    h+=goalSettings(p);
+    h+=`<div class="stat"><div class="row"><button class="fbtn" id="open-letter">This week so far</button></div><div class="s">A short letter about your week. A new one arrives at the end of every week.</div></div>`;
     h+=`<div class="stat"><div class="s">In the manuscript: ${esc(draftName('first'))} ${fmt(f)} words${p.mode!=='write'||s?`, ${esc(draftName('second'))} ${fmt(s)} words`:''}.</div></div>`;
   }
   if(folioView==='projects'){
@@ -1832,13 +1851,15 @@ async function dbxSyncAll(){
   if(!dbxOn() || DBX.busy) return; DBX.busy=true; setDbx('Syncing…');
   try{
     await dbxPullS(); await dbxPullL();
+    const hadS=dbxDirtyS, hadL=dbxDirtyL; DBX.had=[hadS,hadL];
     if(dbxDirtyS){ dbxDirtyS=false; syncDom(); S.savedAt=S.savedAt||Date.now(); await dbxPushOne(SFILE,'s',()=>JSON.stringify(S),async()=>{ await dbxPullS(); }); }
     if(dbxDirtyL && LOG){ dbxDirtyL=false; await dbxPushOne(LFILE,'l',()=>JSON.stringify(LOG.exportState()),dbxPullL); }
     DBX.at=Date.now(); DBX.synced=Date.now(); dbxSave(); setDbx('Synced'); if(LOG) LOG.setSync('synced');
     if(store.mode!=='memory') $('#saved').textContent='Synced';
-  }catch(e){ setDbx(dbxErr(e)); if(e&&e.auth){ DBX.token=''; } }
+  }catch(e){ setDbx(dbxErr(e)); if(e&&e.auth){ DBX.token=''; } if(DBX.had){ dbxDirtyS=dbxDirtyS||DBX.had[0]; dbxDirtyL=dbxDirtyL||DBX.had[1]; } }
+  DBX.had=null;
   DBX.busy=false;
-  if(dbxDirtyS||dbxDirtyL){ clearTimeout(dbxT); dbxT=setTimeout(dbxSyncAll,5000); }
+  if(dbxDirtyS||dbxDirtyL){ clearTimeout(dbxT); dbxT=setTimeout(dbxSyncAll, navigator.onLine===false?60000:8000); }
 }
 function dbxSoon(which){ if(!dbxOn()) return; if(which==='l') dbxDirtyL=true; else dbxDirtyS=true; clearTimeout(dbxT); dbxT=setTimeout(dbxSyncAll,4000); }
 async function dbxCheck(){
@@ -1891,6 +1912,7 @@ function flushTrack(){ for(const k of ['first','second']){ clearTimeout(tT[k]); 
 const storyOfLog=pid=>{ const sb=LOG&&LOG.sbIdOf(pid); return S&&S.projects.find(x=>x.id===sb)||null; };
 const bridge={
   changed(){ dbxSoon('l'); },
+  cycle(){ cycleDone(); },
   ask:(m,y)=>ask(m,y),
   tick(txt){ const b=$('#open-log'); if(!b) return; b.textContent = txt ? '⏱ '+txt : 'Log'; b.setAttribute('aria-pressed', String(!!txt)); },
   scrollTop(){ $('#logbody').scrollTop=0; },
@@ -2158,7 +2180,7 @@ function edDone(){
   const c=+list[edCur].dataset.c; const d=new Set(p.edoc.done||[]);
   if(d.has(c)) d.delete(c); else d.add(c);
   p.edoc.done=[...d]; list[edCur].classList.toggle('done',d.has(c)); scheduleSave(); edNav();
-  if(d.has(c)){ const left=list.filter(el=>!d.has(+el.dataset.c)).length; toast(left?`${left} to go`:'Every change is worked through'); }
+  if(d.has(c)){ const left=list.filter(el=>!d.has(+el.dataset.c)).length; if(left) toast(`${left} to go`); else cheer('Every change from your editor is worked through.','Your book is so close now.',true); }
 }
 $('#ed-file').onclick=()=>$('#file-edocx').click();
 $('#file-edocx').addEventListener('change',e=>{ const f=e.target.files[0]; e.target.value=''; if(f) importEditorDocx(f); });
@@ -2241,7 +2263,7 @@ function bindExtra(body,view){
     body.querySelectorAll('[data-snapx]').forEach(b=>b.onclick=()=>{ const [date,id]=b.dataset.snapx.split('|'); const e=SNAP.data&&SNAP.data.dates[date]&&SNAP.data.dates[date][id]; if(e) exportDocx(id,{html:e.html,name:e.name,date}); });
     const sa=body.querySelector('#snap-all'); if(sa) sa.onclick=()=>{ snapShowAll=true; renderFolio(); };
   }
-  if(view==='progress'){ const ol=body.querySelector('#open-log2'); if(ol) ol.onclick=()=>{ closeFolio(); openLog(); }; }
+  if(view==='progress'){ bindGoal(body); const ol=body.querySelector('#open-log2'); if(ol) ol.onclick=()=>{ closeFolio(); openLog(); }; }
 }
 function progressExtra(p){
   if(!LOG) return '';
@@ -2876,7 +2898,7 @@ function startSprint(){
 function finishSprint(end,auto){
   const day=runningDay();if(!day)return;const r=day.running;
   const s={id:uid(),pid:r.pid,start:r.start,end:Math.max(end,r.start+1000),planned:r.planned||null,words:null};
-  day.sprints.push(s);day.running=null;snapshotProj(day,r.pid);try{bridge.onFinish(r.pid,day,s)}catch(e){}touch(day.date);unlockScreen();
+  day.sprints.push(s);day.running=null;snapshotProj(day,r.pid);try{bridge.onFinish(r.pid,day,s)}catch(e){}try{if(day.block==='b5'&&day.sprints.filter(x=>x.end).length===1)bridge.cycle()}catch(e){}touch(day.date);unlockScreen();
   if(auto)chime();bridge.tick(null);
   if(view.tab==='today'&&view.date===day.date)render();
   openWords(day.date,s.id);
@@ -2993,9 +3015,41 @@ loadLocal();
 render();
 (function resume(){const d=runningDay();if(d&&d.running.planned&&Date.now()-d.running.start>=d.running.planned*60000)finishSprint(d.running.start+d.running.planned*60000,false)})();
 connect();
-function nextBlock(ds){ const prev=allDays().filter(d=>d.block&&d.date<ds); const l=prev[prev.length-1]; const m=l&&/^b([1-4])$/.exec(l.block); return m?'b'+(+m[1]+1):'b1'; }
+function nextBlock(ds){ const prev=allDays().filter(d=>d.block&&/^b[1-5]$/.test(d.block)&&d.date<ds); const l=prev[prev.length-1]; const m=l&&/^b([1-4])$/.exec(l.block); return m?'b'+(+m[1]+1):'b1'; }
+function fillGaps(wrote){
+  if(!S.settings.show.block) return 0;
+  const td=todayISO(), y=addDays(td,-1);
+  const act=Object.values(S.days).filter(d=>d.date<td&&(d.block||(d.sprints&&d.sprints.length)||Object.keys(d.proj||{}).length)).map(d=>d.date).sort();
+  const base=[act[act.length-1],S.settings.filledUntil].filter(Boolean).sort().pop();
+  if(!base) return 0;
+  let start=addDays(base,1); const floor=addDays(td,-31); if(start<floor) start=floor;
+  let n=0;
+  for(let d=start; d<=y; d=addDays(d,1)){
+    if(wrote&&wrote(d)) continue;
+    const day=S.days[d]; if(day&&(day.block||(day.sprints&&day.sprints.length))) continue;
+    const nd=day||newDay(d); nd.block='winter'; nd.auto=true; if(!nd.u) nd.u=1; S.days[d]=nd; dirty.add(monthKey(d)); n++;
+  }
+  if(!S.settings.filledUntil||S.settings.filledUntil<y){ S.settings.filledUntil=y; dirty.add('settings'); }
+  saveLocal(); clearTimeout(saveTimer); saveTimer=setTimeout(flush,700); try{bridge.changed()}catch(e){}
+  if(n) renderSoon();
+  return n;
+}
 const byStory=sbId=>S.settings.projects.find(x=>x.sbId===sbId);
+const hasData=pid=>Object.values(S.days).some(d=>(d.sprints||[]).some(s=>s.pid===pid)||(d.proj&&d.proj[pid]&&Object.keys(d.proj[pid]).some(k=>!['phase','felt'].includes(k))));
+function adopt(p){
+  if(!p) return p; const twin=S.settings.projects.find(x=>x!==p&&!x.sbId&&x.title.trim().toLowerCase()===p.title.trim().toLowerCase());
+  if(!twin || hasData(p.id)) return p;
+  twin.sbId=p.sbId; S.settings.projects=S.settings.projects.filter(x=>x!==p);
+  for(const d of Object.values(S.days)){ if(d.proj&&d.proj[p.id]){ delete d.proj[p.id]; } }
+  if(S.settings.activeProject===p.id) S.settings.activeProject=twin.id;
+  touch('settings'); renderSoon(); return twin;
+}
 return {
+  fillGaps,
+  target(sbId,v){ const p=byStory(sbId); if(!p) return null; if(v!==undefined){ p.target=v; touch('settings'); renderSoon(); } return p.target||null; },
+  week(ws){ let minutes=0,sprints=0,blocks=0,winter=0; const wrote=[];
+    for(let i=0;i<7;i++){ const d=S.days[addDays(ws,i)]; if(!d) continue; const sp=d.sprints.filter(x=>x.end); minutes+=sp.reduce((a,x)=>a+sprintMin(x),0); sprints+=sp.length; if(sp.length) wrote.push(d.date); if(/^b[1-5]$/.test(d.block||'')) blocks++; if(d.block==='winter') winter++; }
+    return {minutes:Math.round(minutes),sprints,blocks,winter,wrote}; },
   exportState(){ return S; },
   setSync(s){ setSync(s); },
   mergeIn(x){
@@ -3012,12 +3066,13 @@ return {
     title=(title||'Untitled').trim(); let ch=false;
     let p=byStory(sbId);
     if(!p){ p=S.settings.projects.find(x=>!x.sbId&&x.title.trim().toLowerCase()===title.toLowerCase()); if(p){ p.sbId=sbId; ch=true; } }
+    else p=adopt(p);
     if(!p){ const keep=S.settings.activeProject; p=newProject(title); p.sbId=sbId; ch=true; if(runningDay()) S.settings.activeProject=keep; }
     if(!runningDay() && S.settings.activeProject!==p.id){ S.settings.activeProject=p.id; view.wordsPid=null; ch=true; }
     if(ch){ touch('settings'); renderSoon(); }
     return p.id;
   },
-  rename(sbId,title){ const p=byStory(sbId); if(p&&title&&p.title!==title){ p.title=title; touch('settings'); renderSoon(); } },
+  rename(sbId,title){ const p=byStory(sbId); if(p&&title&&p.title!==title){ p.title=title; touch('settings'); renderSoon(); adopt(p); } },
   sbIdOf(pid){ const p=proj(pid); return p&&p.sbId; },
   felt(sbId,v){ const p=byStory(sbId); if(!p) return false;
     if(v!==undefined){ p.felt=!!v; touch('settings'); const ds=todayISO(), day=dayFor(ds); snapshotProj(day,p.id); day.proj[p.id].felt=p.felt; touch(ds); renderSoon(); }
@@ -3028,6 +3083,190 @@ return {
     return {last:last.block, date:last.date, total:ds.filter(d=>/^b\d$/.test(d.block)).length, winter}; }
 };
 }
+
+/* ================= MOTIVATION: daily goal, milestones, confetti ================= */
+const MILES=[5000,10000,25000,50000,75000,100000,125000,150000,200000,250000,300000];
+const goalOf=()=>S&&S.goal!=null?S.goal:1000;
+const todayAll=()=>S.projects.reduce((a,p)=>a+((p.stats&&p.stats.days&&p.stats.days[today()])||0),0);
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const CHEER={
+  first:[n=>`Your first goal day! ${fmt(n)} words. This is how books get written.`],
+  goal:[n=>`You reached your goal for today. ${fmt(n)} words.`, n=>`Goal met! ${fmt(n)} words today. That is real work.`, n=>`There it is: ${fmt(n)} words. Your story thanks you.`, n=>`${fmt(n)} words today. Look at you go.`, n=>`Today's goal, done. ${fmt(n)} words closer to the whole story.`],
+  mile:[(t,m)=>`${t} just passed ${fmt(m)} words written. Wonderful.`, (t,m)=>`${fmt(m)} words written for ${t}. Every one of them counts.`]
+};
+let cheerT=null, confRun=0;
+function cheer(msg,sub,big){
+  const el=$('#cheer'); el.innerHTML=esc(msg)+(sub?`<small>${esc(sub)}</small>`:'');
+  el.classList.add('show'); clearTimeout(cheerT); cheerT=setTimeout(()=>el.classList.remove('show'), big?5200:4000);
+  if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  confetti(big?240:150, big?4400:3400);
+}
+function confetti(count,dur){
+  const cv=$('#confetti'); const ctx=cv&&cv.getContext&&cv.getContext('2d'); if(!ctx) return;
+  const dpr=window.devicePixelRatio||1, W=innerWidth, H=innerHeight; cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0);
+  const cs=getComputedStyle(document.documentElement); const tok=n=>cs.getPropertyValue(n).trim();
+  const cols=['--n-character','--n-place','--n-food','--n-animal','--t-names','--t-lade','--t-knip','--t-later','--t-feel','--t-checks'].map(tok).filter(Boolean).concat(['#f2eadb']);
+  const run=++confRun; const bursts=[[W*.2,H*.4],[W*.8,H*.4],[W*.5,H*.25]];
+  const ps=[...Array(count)].map((_,i)=>{ const [bx,by]=bursts[i%3]; const a=-Math.PI/2+(Math.random()-.5)*2.2, v=6+Math.random()*9;
+    return {x:bx,y:by,vx:Math.cos(a)*v,vy:Math.sin(a)*v,r:Math.random()*Math.PI,vr:(Math.random()-.5)*.35,w:6+Math.random()*7,h:4+Math.random()*6,c:cols[i%cols.length],k:Math.random()<.2?'star':Math.random()<.3?'dot':'rect',sw:Math.random()*10}; });
+  cv.style.display='block'; const t0=performance.now();
+  (function frame(now){
+    if(run!==confRun) return; const el=now-t0; ctx.clearRect(0,0,W,H);
+    ctx.globalAlpha=Math.max(0,1-Math.max(0,el-dur+900)/900);
+    for(const p of ps){ p.vy+=.22; p.vx*=.99; p.vy*=.99; p.x+=p.vx+Math.sin(el/300+p.sw)*.8; p.y+=p.vy; p.r+=p.vr;
+      ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r); ctx.fillStyle=p.c;
+      if(p.k==='dot'){ ctx.beginPath(); ctx.arc(0,0,p.w/2.2,0,7); ctx.fill(); }
+      else if(p.k==='star'){ ctx.beginPath(); for(let j=0;j<10;j++){ const rr=j%2?p.w*.45:p.w, an=j*Math.PI/5; ctx.lineTo(Math.cos(an)*rr,Math.sin(an)*rr); } ctx.closePath(); ctx.fill(); }
+      else { ctx.scale(1,Math.cos(el/120+p.sw)); ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h); }
+      ctx.restore(); }
+    if(el<dur) requestAnimationFrame(frame); else { ctx.clearRect(0,0,W,H); cv.style.display='none'; }
+  })(t0);
+}
+/* which goal counts today: drafting counts words, rewriting can count minutes */
+const rwMode=()=>{ const p=P(); return !!p && (p.mode==='rewrite'||p.mode==='read'); };
+const GR=()=>S.goalRw||(S.goalRw={type:'minutes',n:60});
+const activeMin=()=>Math.floor(((S.active||{})[today()]||0)/60);
+let lastAct=0;
+function bumpActive(){
+  if(!S) return; const now=Date.now(), gap=now-lastAct; lastAct=now;
+  if(gap>0 && gap<120000){ S.active=S.active||{}; S.active[today()]=(S.active[today()]||0)+gap/1000;
+    const keys=Object.keys(S.active); if(keys.length>60) keys.sort().slice(0,keys.length-60).forEach(k=>delete S.active[k]);
+    clearTimeout(actT); actT=setTimeout(()=>{ scheduleSave(); checkGoals(); },1500); }
+}
+let actT=null;
+for(const k of ['first','second']){ ['input','keydown','pointerdown'].forEach(ev=>eds[k].addEventListener(ev,bumpActive,{passive:true})); scrolls[k].addEventListener('scroll',bumpActive,{passive:true}); }
+$('#read-scroll').addEventListener('scroll',()=>{ if(P()&&P().mode==='read') bumpActive(); },{passive:true});
+
+function checkGoals(){
+  if(!S) return; const p=P(); let changed=false;
+  const g=goalOf(), n=todayAll();
+  if(g>0 && n>=g && S.goalHit!==today()){
+    S.goalHit=today(); changed=true;
+    if(!S.goalEver){ S.goalEver=true; cheer(pick(CHEER.first)(n),'Goal for today: '+fmt(g),true); }
+    else cheer(pick(CHEER.goal)(n),'Goal for today: '+fmt(g),true);
+  }
+  const gr=GR();
+  if(rwMode() && gr.n>0 && S.goalHitRw!==today()){
+    const have=gr.type==='minutes'?activeMin():n;
+    if(have>=gr.n){ S.goalHitRw=today(); changed=true;
+      cheer(gr.type==='minutes'?pick(CHEER.rwMin)(have):pick(CHEER.goal)(have), 'Rewriting goal for today: '+fmt(gr.n)+(gr.type==='minutes'?' minutes':' words'), true); }
+  }
+  if(p){
+    S.miles=S.miles||{}; const reached=MILES.filter(m=>p.stats.total>=m).pop()||0;
+    if(S.miles[p.id]===undefined){ S.miles[p.id]=reached; changed=true; }
+    else if(reached>S.miles[p.id]){ S.miles[p.id]=reached; changed=true; cheer(pick(CHEER.mile)(p.title,reached),'',false); }
+    const tgt=LOG&&LOG.target(p.id);
+    if(tgt){ const q=quarter(msWords(p),tgt); p.lenMiles=p.lenMiles||{};
+      if(p.lenMiles[tgt]===undefined){ p.lenMiles[tgt]=q; changed=true; }
+      else if(q>p.lenMiles[tgt]){ p.lenMiles[tgt]=q; changed=true; cheer(CHEER.len[q](p.title,tgt),fmt(msWords(p))+' of '+fmt(tgt)+' words',q===4); } }
+  }
+  if(changed) scheduleSave();
+}
+const quarter=(have,of)=>of>0?Math.min(4,Math.floor(have/of*4+1e-9)):0;
+CHEER.rwMin=[m=>`${m} minutes with your draft today. That is how a story gets its shape.`, m=>`Your rewriting time is in: ${m} minutes. Lovely work.`];
+CHEER.len={1:(t,g)=>`A quarter of ${t} is on the page.`,2:(t,g)=>`Halfway! ${t} is half the length you imagined.`,3:(t,g)=>`Three quarters of ${t}. The end is in sight.`,4:(t,g)=>`${t} has reached its full length. What a thing you have made.`};
+CHEER.mark={1:d=>`A quarter of ${d} worked through.`,2:d=>`Halfway through ${d}. Steady and good.`,3:d=>`Three quarters of ${d} done. Keep going.`,4:d=>`You have worked through all of ${d}!`};
+function checkMarks(){
+  const p=P(); if(!p||p.mode!=='rewrite') return;
+  const f=words(eds.first.innerText); if(!f) return;
+  const q=quarter(markWords('g')+markWords('y')+markWords('r'),f);
+  const id=p.slots.first; p.markMiles=p.markMiles||{};
+  if(p.markMiles[id]===undefined || q<p.markMiles[id]){ p.markMiles[id]=q; scheduleSave(); return; }
+  if(q>p.markMiles[id]){ p.markMiles[id]=q; scheduleSave(); cheer(CHEER.mark[q](draftName('first')),'',q===4); }
+}
+function initMiles(){
+  const p=P(); if(!p) return;
+  if(p.mode==='rewrite') checkMarks();
+  const tgt=LOG&&LOG.target(p.id); if(tgt){ p.lenMiles=p.lenMiles||{}; if(p.lenMiles[tgt]===undefined) p.lenMiles[tgt]=quarter(msWords(p),tgt); }
+}
+function cycleDone(){ setTimeout(()=>cheer('Block 5 is done. Your cycle is complete.','Time to winter. You have earned it.',true),3200); }
+
+function goalStat(){
+  const rw=rwMode(), gr=GR();
+  const g=rw?gr.n:goalOf(), byMin=rw&&gr.type==='minutes';
+  const n=byMin?activeMin():todayAll(), unit=byMin?'minutes':'words';
+  const pc=g?Math.min(100,Math.round(n/g*100)):0, met=g&&n>=g;
+  return `<div class="stat"><div class="k">${rw?'Today, rewriting':'Today, across your stories'}</div><span class="big">${fmt(n)}${byMin?' min':''}</span>
+    ${g?`<div class="bar3" aria-hidden="true"><span style="width:${pc}%;background:${met?'#8fb685':'var(--t-names)'}"></span></div>
+    <div class="s">${met?`Your goal of ${fmt(g)} ${unit} is reached. Everything from here is extra.`:`${pc}% of your goal of ${fmt(g)} ${unit}.`}</div>`:''}</div>`;
+}
+function lengthStat(p){
+  const tgt=LOG&&LOG.target(p.id); if(!tgt) return '';
+  const have=msWords(p), pc=Math.min(100,Math.round(have/tgt*100));
+  return `<div class="stat"><div class="k">${esc(p.title)}, on its way to ${fmt(tgt)} words</div><span class="big">${pc}%</span>
+    <div class="bar3" aria-hidden="true"><span style="width:${pc}%;background:${pc>=100?'#8fb685':'var(--t-names)'}"></span></div>
+    <div class="s">${fmt(have)} words in ${esc(draftName(p.mode==='write'||!p.mode?'first':'second'))}.</div></div>`;
+}
+function goalSettings(p){
+  const gr=GR(), tgt=LOG?LOG.target(p.id)||'':'';
+  return `<div class="stat"><div class="k">Your goals</div>
+    <div class="grow"><label for="goal-in">While drafting</label><input id="goal-in" class="goal-in" type="number" inputmode="numeric" min="0" step="50" value="${goalOf()}"><span>words a day</span></div>
+    <div class="grow"><label for="goal-rw">While rewriting</label><input id="goal-rw" class="goal-in" type="number" inputmode="numeric" min="0" step="5" value="${gr.n}">
+      <select id="goal-rwt" class="goal-in" style="width:auto"><option value="minutes" ${gr.type==='minutes'?'selected':''}>minutes a day</option><option value="words" ${gr.type==='words'?'selected':''}>words a day</option></select></div>
+    ${LOG?`<div class="grow"><label for="goal-len">Length of ${esc(p.title)}</label><input id="goal-len" class="goal-in" type="number" inputmode="numeric" min="0" step="1000" value="${tgt}" placeholder="—"><span>words</span></div>`:''}
+    <div class="s">Use 0 for no goal. Minutes count the time you are actively reading, marking and writing.</div></div>`;
+}
+function bindGoal(body){
+  const gi=body.querySelector('#goal-in'); if(gi) gi.onchange=()=>{ const v=Math.max(0,Math.round(+gi.value||0)); S.goal=v; if(v && todayAll()<v && S.goalHit===today()) S.goalHit=null; scheduleSave(); renderFolio(); checkGoals(); };
+  const gr=body.querySelector('#goal-rw'); if(gr) gr.onchange=()=>{ GR().n=Math.max(0,Math.round(+gr.value||0)); S.goalHitRw=null; scheduleSave(); renderFolio(); checkGoals(); };
+  const gt=body.querySelector('#goal-rwt'); if(gt) gt.onchange=()=>{ GR().type=gt.value; S.goalHitRw=null; scheduleSave(); renderFolio(); checkGoals(); };
+  const gl=body.querySelector('#goal-len'); if(gl) gl.onchange=()=>{ const v=Math.max(0,Math.round(+gl.value||0)); LOG.target(P().id,v||null); const p=P(); p.lenMiles=p.lenMiles||{}; if(v) p.lenMiles[v]=quarter(msWords(p),v); scheduleSave(); renderFolio(); };
+  const wl=body.querySelector('#open-letter'); if(wl) wl.onclick=()=>openLetter(weekStartOf(today()));
+}
+
+/* ================= the weekly letter ================= */
+const addD=(ds,n)=>{ const d=new Date(ds+'T12:00:00'); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+const weekStartOf=ds=>{ const d=new Date(ds+'T12:00:00'); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d.toISOString().slice(0,10); };
+function weekData(ws){
+  const days=[...Array(7)].map((_,i)=>addD(ws,i));
+  const per=days.map(d=>S.projects.reduce((a,p)=>a+((p.stats.days||{})[d]||0),0));
+  const words=per.reduce((a,b)=>a+b,0);
+  const lw=LOG?LOG.week(ws):{minutes:0,sprints:0,blocks:0,wrote:[]};
+  const wroteDays=new Set(days.filter((d,i)=>per[i]>0)); (lw.wrote||[]).forEach(d=>wroteDays.add(d));
+  const best=per.indexOf(Math.max(...per));
+  const inWeek=iso=>iso && iso.slice(0,10)>=ws && iso.slice(0,10)<=days[6];
+  const names=S.projects.reduce((a,p)=>a+(p.names||[]).filter(n=>inWeek(n.added)).length,0);
+  const clips=S.projects.reduce((a,p)=>a+(p.knip||[]).filter(k=>inWeek(k.date)).reduce((x,k)=>x+k.words,0),0);
+  const stories=S.projects.filter(p=>days.some(d=>((p.stats.days||{})[d]||0)>0)).map(p=>p.title);
+  return {ws,days,words,per,best,wroteDays:wroteDays.size,minutes:lw.minutes,sprints:lw.sprints,blocks:lw.blocks,winter:lw.winter||0,names,clips,stories};
+}
+function letterHtml(w){
+  const nice=ds=>new Date(ds+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'long'});
+  const bestDay=w.per[w.best]>0?new Date(w.days[w.best]+'T12:00:00').toLocaleDateString('en-GB',{weekday:'long'}):'';
+  const lines=[];
+  if(w.words) lines.push(`You wrote <b>${fmt(w.words)}</b> new words${w.stories.length?` for ${w.stories.map(esc).join(' and ')}`:''}.`);
+  if(w.wroteDays) lines.push(`You sat down with your story on <b>${w.wroteDays}</b> ${w.wroteDays===1?'day':'days'}${w.blocks?`, ${w.blocks} of them writing ${w.blocks===1?'block':'blocks'}`:''}.`);
+  if(w.minutes) lines.push(`Your sprints add up to <b>${w.minutes>=60?Math.floor(w.minutes/60)+' h '+String(w.minutes%60).padStart(2,'0'):w.minutes+' min'}</b>, over ${w.sprints} ${w.sprints===1?'sprint':'sprints'}.`);
+  if(bestDay) lines.push(`${bestDay} was your fullest day, with ${fmt(w.per[w.best])} words.`);
+  if(w.names) lines.push(`${w.names} new ${w.names===1?'name':'names'} found ${w.names===1?'its':'their'} way into your notebook.`);
+  if(w.clips) lines.push(`${fmt(w.clips)} words went to your clippings: words you wrote to find the story.`);
+  if(w.winter) lines.push(`You gave yourself ${w.winter} wintering ${w.winter===1?'day':'days'}. Rest is part of the work.`);
+  if(!lines.length) lines.push('This was a quiet week. Quiet weeks are part of writing a book too. Your story is waiting for you, right where you left it.');
+  return `<h2>Your week</h2><p class="intro">${nice(w.days[0])} to ${nice(w.days[6])}</p><div class="letter">${lines.map(l=>`<p>${l}</p>`).join('')}<p class="sign">Look at what you made.</p></div>`;
+}
+function openLetter(ws){ folioView='letter'; $('#folio').scrollTop=0; $('#folio-body').innerHTML=letterHtml(weekData(ws)); $('#folio').classList.add('open'); $('#folio').setAttribute('aria-hidden','false'); $('#scrim').classList.add('open'); }
+function maybeLetter(){
+  if(!S) return; const td=today(), now=new Date(); const cur=weekStartOf(td), prev=addD(cur,-7);
+  let ws=null;
+  if(now.getDay()===0 && now.getHours()>=17 && S.letterSeen!==cur) ws=cur;
+  else if(S.letterSeen!==prev && S.letterSeen!==cur && !(S.letterSeen&&S.letterSeen>prev)){ const w=weekData(prev); if(w.words||w.wroteDays||w.minutes) ws=prev; else { S.letterSeen=prev; scheduleSave(); } }
+  if(!ws) return; S.letterSeen=ws; scheduleSave(); setTimeout(()=>{ if(!folioView) openLetter(ws); },900);
+}
+
+/* ================= days away become wintering days ================= */
+const wroteOn=d=>S.projects.some(p=>((p.stats&&p.stats.days&&p.stats.days[d])||0)>0);
+function autoWinter(){
+  if(!LOG || !S) return; let n=0;
+  try{ n=LOG.fillGaps(wroteOn); }catch(e){}
+  setTimeout(maybeLetter,1200);
+  if(n) setTimeout(()=>toast(n===1?'Welcome back. Yesterday is a wintering day now. Rest is part of the work':`Welcome back. The ${n} days you were away are wintering days now. Rest is part of the work`),400);
+}
+let lastDay=today();
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') maybeLetter(); });
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && today()!==lastDay){ lastDay=today(); autoWinter(); } });
+
+/* ================= offline: keep the app on this device (own website only) ================= */
+if(DBX_OK && 'serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
 
 /* ---------------- start ---------------- */
 (async function start(){
@@ -3040,6 +3279,7 @@ return {
   if(window.innerWidth<=560) S.sideOpen=false;
   if(!P()) S.activeId=S.projects[0].id;
   await dbxStartup();
+  setTimeout(autoWinter, 1500);
   applySide(); applyTw(); loadProject();
   if(store.mode==='memory') $('#saved').textContent='Not saved on this device: make a backup';
 })();
