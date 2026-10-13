@@ -351,6 +351,7 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
     </div>
     <button class="qbtn" id="open-progress">Progress</button>
     <button class="qbtn" id="open-projects">Stories</button>
+    <button class="qbtn" id="quick-sprint" title="Start a sprint right away">▶ Sprint</button>
     <button class="qbtn" id="open-log" aria-pressed="false" title="Sprint timer and your writing log">Log</button>
     <button class="qbtn" id="toggle-tw" aria-pressed="false" title="Keep the line you are typing in the middle of the page">Typewriter</button>
     <button class="qbtn" id="toggle-side" aria-pressed="true" title="Show or hide your small notebook">Notebook</button>
@@ -657,6 +658,9 @@ input[type=number],input[type=text],input[type=time],input[type=date],select,tex
 #modal .dialog{background:#f2eadb;border:0;border-radius:24px;box-shadow:0 40px 90px rgba(0,0,0,.5)}
 .cheer{background:#f2eadb;border-color:var(--accent)}
 .cheer small{color:#7c6f5e}
+.unlog{border:2px solid var(--accent)}
+.unrow{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:6px 0}
+.unrow p{margin:0;flex:1 1 220px}
 .timecard{background:#f2eadb;border-radius:20px;box-shadow:0 18px 44px rgba(0,0,0,.35),0 3px 10px rgba(0,0,0,.2);padding:18px 20px 22px;margin-bottom:16px;--ink:#2a231b;--ink-2:#7c6f5e;--ink-3:#a0937f;--line:rgba(60,45,30,.13);color:var(--ink)}
 .timecard .daynav{margin-bottom:6px}
 .timecard .iconbtn{background:rgba(42,35,27,.07);color:var(--ink)}
@@ -811,9 +815,10 @@ function setFirstEditable(){
   $('#lock-first').textContent = firstLocked ? 'Edit' : 'Done editing';
   $('#lock-first').title = firstLocked ? 'This draft is locked so you can read and mark in peace' : 'Lock this draft again';
 }
+let selW={first:0,second:0};
 function refreshCounts(){
-  $('#count-first').textContent = fmt(words(eds.first.innerText))+' words';
-  $('#count-second').textContent = fmt(words(eds.second.innerText))+' words';
+  $('#count-first').textContent = fmt(words(eds.first.innerText))+' words'+(selW.first?` · ${fmt(selW.first)} selected`:'');
+  $('#count-second').textContent = fmt(words(eds.second.innerText))+' words'+(selW.second?` · ${fmt(selW.second)} selected`:'');
   buildChapters('first'); buildChapters('second');
 }
 function renderTabs(){
@@ -901,7 +906,7 @@ function caretNearEnd(k){
 function track(k){
   const n=words(eds[k].innerText); let d=n-last[k]-ignore[k]; ignore[k]=0; last[k]=n;
   if(d>0){
-    const st=P().stats; st.total+=d; st.days[today()]=(st.days[today()]||0)+d;
+    const st=P().stats; st.total+=d; st.days[today()]=(st.days[today()]||0)+d; recordMinute(P(),d);
     if(caretNearEnd(k)) st.forward+=d; else st.mid+=d;
     checkGoals();
   }
@@ -937,6 +942,12 @@ for(const k of ['first','second']){
 }
 
 /* ---------------- selection memory ---------------- */
+let selT=null;
+document.addEventListener('selectionchange',()=>{ clearTimeout(selT); selT=setTimeout(()=>{
+  const s=getSelection(); const nw={first:0,second:0};
+  if(s.rangeCount && !s.isCollapsed){ const r=s.getRangeAt(0); for(const k of ['first','second']) if(eds[k].contains(r.commonAncestorContainer)) nw[k]=words(r.toString()); }
+  if(nw.first!==selW.first||nw.second!==selW.second){ selW=nw; ['first','second'].forEach(k=>{ $('#count-'+k).textContent=fmt(words(eds[k].innerText))+' words'+(selW[k]?` · ${fmt(selW[k])} selected`:''); }); }
+},120); });
 document.addEventListener('selectionchange',()=>{
   const s=getSelection(); if(!s.rangeCount) return;
   const r=s.getRangeAt(0);
@@ -2016,11 +2027,19 @@ function phaseFor(p){
 }
 function flushTrack(){ for(const k of ['first','second']){ clearTimeout(tT[k]); track(k); } }
 const storyOfLog=pid=>{ const sb=LOG&&LOG.sbIdOf(pid); return S&&S.projects.find(x=>x.id===sb)||null; };
+function recordMinute(p,d){
+  const now=new Date(), key=today(), m=now.getHours()*60+now.getMinutes();
+  const st=p.stats; st.mins=st.mins||{}; const first=!st.mins[key]; const day=(st.mins[key]=st.mins[key]||{}); day[m]=(day[m]||0)+d;
+  const ks=Object.keys(st.mins).sort(); if(ks.length>21) ks.slice(0,ks.length-21).forEach(k=>delete st.mins[k]);
+  if(LOG){ try{ LOG.autoStart(p.id,Date.now()); }catch(e){} }
+}
 const bridge={
+  dayWords(pid,ds){ const p=storyOfLog(pid); return (p&&p.stats&&p.stats.days&&p.stats.days[ds])||0; },
+  minutes(pid,ds){ const p=storyOfLog(pid); return (p&&p.stats&&p.stats.mins&&p.stats.mins[ds])||null; },
   changed(){ dbxSoon('l'); },
   cycle(){ cycleDone(); },
   ask:(m,y)=>ask(m,y),
-  tick(txt){ const b=$('#open-log'); if(!b) return; b.textContent = txt ? '⏱ '+txt : 'Log'; b.setAttribute('aria-pressed', String(!!txt)); },
+  tick(txt){ const b=$('#open-log'); if(!b) return; b.textContent = txt ? '⏱ '+txt : 'Log'; b.setAttribute('aria-pressed', String(!!txt)); const q=$('#quick-sprint'); if(q){ q.textContent = txt ? '■ Stop' : '▶ Sprint'; q.title = txt ? 'Stop this sprint' : 'Start a sprint right away'; } },
   scrollTop(){ $('#logbody').scrollTop=0; },
   onStart(pid,day){
     const p=storyOfLog(pid); if(!p) return;
@@ -2043,9 +2062,10 @@ const bridge={
     S.sprint=null; scheduleSave(); openLog();
   }
 };
-function openLog(){ const s=$('#logsheet'); s.inert=false; s.classList.add('open'); s.setAttribute('aria-hidden','false'); }
+function openLog(){ if(LOG) LOG.refresh(); const s=$('#logsheet'); s.inert=false; s.classList.add('open'); s.setAttribute('aria-hidden','false'); }
 function closeLog(){ const s=$('#logsheet'); s.classList.remove('open'); s.inert=true; s.setAttribute('aria-hidden','true'); }
 $('#open-log').onclick=openLog;
+$('#quick-sprint').onclick=()=>{ if(!LOG) return; if(LOG.running()){ flushTrack(); LOG.quickStop(); } else { LOG.ensure(P().id,P().title); LOG.quickStart(); toast('Sprint started. Write away'); } };
 $('#log-close').onclick=closeLog;
 function mountLogSheet(){
   try{
@@ -2682,7 +2702,7 @@ function rToday(){
     ${isToday?'':`<button class="link" data-act="day-today">${t('backToday')}</button>`}
   </div>`;
   return`<div class="today-grid">
-    <div><section class="timecard">${dn}${rTimer(day,isToday)}</section>${rSprints(day,st)}${rWords(day)}</div>
+    <div>${rUnlogged(day)}<section class="timecard">${dn}${rTimer(day,isToday)}</section>${rSprints(day,st)}${rWords(day)}</div>
     <div>${rConditions(day)}</div>
   </div>`;
 }
@@ -2703,6 +2723,38 @@ function rTimer(day,isToday){
     ${r?`<button class="btn" data-act="stop">${t('stop')}</button>`:`<button class="btn" data-act="start">${t('startSprint')}</button>`}
     <div style="margin-top:10px"><button class="link" data-act="add-sprint">${t('addByHand')}</button></div>
   </section>`;
+}
+function minsOf(pid,ds){ try{ return bridge.minutes(pid,ds)||{}; }catch(e){ return {}; } }
+function wordsBetween(pid,ds,start,end){ const t0=parseISO(ds).getTime(); let w=0; for(const [m,v] of Object.entries(minsOf(pid,ds))){ const ts=t0+(+m)*60000; if(ts>=start-60000&&ts<end) w+=v; } return w; }
+function unlogged(day){
+  const out=[], t0=parseISO(day.date).getTime(), run=day.running;
+  for(const p of S.settings.projects){ if(!p.sbId||p.archived) continue;
+    const mins=Object.entries(minsOf(p.id,day.date)).map(([m,v])=>[+m,v]).sort((a,b)=>a[0]-b[0]); if(!mins.length) continue;
+    const sp=day.sprints.filter(s=>s.end&&s.pid===p.id).map(s=>[s.start,s.end]); if(run&&run.pid===p.id) sp.push([run.start,Date.now()+60000]);
+    const covered=ts=>sp.some(([a,b])=>ts>=a-60000&&ts<b+60000);
+    let seg=null; const segs=[];
+    for(const [m,v] of mins){ const ts=t0+m*60000; if(covered(ts)) { seg=null; continue; }
+      if(!seg || m-seg.to>20 || sp.some(([a])=>a>t0+seg.to*60000&&a<ts)){ seg={pid:p.id,from:m,to:m,words:0}; segs.push(seg); }
+      seg.to=m; seg.words+=v; }
+    segs.filter(s=>s.words>=20).forEach(s=>out.push(s));
+  }
+  for(const p of S.settings.projects){ if(!p.sbId||p.archived) continue;
+    const minsW=Object.values(minsOf(p.id,day.date)).reduce((a,v)=>a+v,0);
+    let dw=0; try{ dw=bridge.dayWords(p.id,day.date)||0; }catch(e){}
+    const inSprints=day.sprints.filter(s=>s.end&&s.pid===p.id).reduce((a,s)=>a+(+s.words||0),0);
+    const rest=dw-minsW-Math.max(0,inSprints-minsW);
+    if(rest>=20 && !(run&&run.pid===p.id)){
+      const now=new Date(), isT=day.date===todayISO(); const nowM=now.getHours()*60+now.getMinutes();
+      const from=day.start!=null?Math.round((day.start-t0)/60000):null, to=day.end!=null?Math.round((day.end-t0)/60000)-1:(isT?nowM:null);
+      out.push({pid:p.id, from, to, words:rest, loose:true});
+    }
+  }
+  return out.slice(0,4);
+}
+function rUnlogged(day){
+  const us=unlogged(day); if(!us.length) return '';
+  const nl=L()==='nl';
+  return `<section class="panel unlog"><h3>${nl?'Geschreven zonder sprint':'Written without a sprint'}</h3>${us.map((u,i)=>`<div class="unrow"><p>${(u.from==null||u.to==null)?(nl?`Je schreef vandaag <b>${num(u.words)}</b> woorden voor ${esc(proj(u.pid).title)} die nog niet in een sprint staan. Vul eerst bij Dag begonnen in hoe laat je begon.`:`You wrote <b>${num(u.words)}</b> words for ${esc(proj(u.pid).title)} today that are not in a sprint yet. Fill in Day started first, so the sprint gets the right time.`):(nl?`Je schreef <b>${num(u.words)}</b> woorden voor ${esc(proj(u.pid).title)} tussen ${hmMin(u.from)} en ${hmMin(u.to+1)}.`:`You wrote <b>${num(u.words)}</b> words for ${esc(proj(u.pid).title)} between ${hmMin(u.from)} and ${hmMin(u.to+1)}.`)}</p>${(u.from==null||u.to==null)?'':`<button class="btn small" data-act="add-unlogged" data-i="${i}">${nl?'Toevoegen als sprint':'Add as a sprint'}</button>`}</div>`).join('')}</section>`;
 }
 function rSprints(day,st){
   const list=[...day.sprints].filter(s=>s.end).sort((a,b)=>a.start-b.start);
@@ -2936,7 +2988,7 @@ function openSprintEditor(ds,id){
     <label>${t('book')}<select id="m-pid">${S.settings.projects.filter(p=>!p.archived||p.id===pid).map(p=>`<option value="${p.id}" ${p.id===pid?'selected':''}>${esc(p.title)}</option>`).join('')}</select></label>
     <label>${t('start')}<input type="time" id="m-start" value="${start}"></label>
     <label>${t('length')}<input type="number" inputmode="numeric" min="1" id="m-min" value="${mins}"></label>
-    <label>${t('words')}<input type="number" inputmode="numeric" min="0" id="m-words" value="${s&&s.words!=null?s.words:''}"></label></div>
+    <label>${t('words')}<input type="number" inputmode="numeric" min="0" id="m-words" value="${s&&s.words!=null?s.words:''}" placeholder="${L()==='nl'?'leeg = automatisch':'empty = counted for you'}"></label></div>
     <div class="actions">${s?`<button class="btn danger small" data-act="del-sprint">${t('del')}</button>`:''}<button class="btn ghost small" data-act="close-modal">${t('cancel')}</button><button class="btn small" data-act="save-sprint">${t('save')}</button></div>`);
 }
 
@@ -3061,8 +3113,14 @@ const ACT={
   'save-sprint':()=>{const{ds,id}=modalCtx;const day=dayFor(ds);const pid=$('#m-pid').value;const st=$('#m-start').value;const mins=+$('#m-min').value;const w=$('#m-words').value;
     if(!st||!mins||!pid)return;const start=tsAt(ds,st),end=start+mins*60000;
     let s=id&&day.sprints.find(x=>x.id===id);const isNew=!s;if(!s){s={id:uid(),planned:null};day.sprints.push(s)}
-    Object.assign(s,{pid,start,end,words:w===''?null:Math.max(0,+w)});snapshotProj(day,pid);touch(ds);closeModal();render();
+    let aw=null; if(w===''){ const x=wordsBetween(pid,ds,start,end); if(x>0) aw=x; }
+    Object.assign(s,{pid,start,end,words:w===''?aw:Math.max(0,+w)});snapshotProj(day,pid);touch(ds);closeModal();render();
     if(isNew)celebrate(day.sprints.filter(x=>x.end).length)},
+  'add-unlogged':b=>{ const day=dayFor(view.date); const u=unlogged(day)[+b.dataset.i]; if(!u) return; const t0=parseISO(day.date).getTime();
+    if(u.from==null||u.to==null) return;
+    const s={id:uid(),pid:u.pid,start:t0+u.from*60000,end:t0+(u.to+1)*60000,planned:null,words:u.words}; day.sprints.push(s);
+    if(day.start==null||day.start>s.start) day.start=s.start; if(!day.block&&S.settings.show.block) day.block=nextBlock(day.date);
+    snapshotProj(day,u.pid); touch(day.date); render(); celebrate(day.sprints.filter(x=>x.end).length); },
   'del-sprint':()=>{const{ds,id}=modalCtx;const day=S.days[ds];day.sprints=day.sprints.filter(x=>x.id!==id);touch(ds);closeModal();render()},
   'day-now':b=>{const day=dayFor(view.date);day[b.dataset.v]=view.date===todayISO()?Date.now():tsAt(view.date,'12:00');touch(view.date);render()},
   pick:b=>{const day=dayFor(view.date);const f=b.dataset.f;let v=b.dataset.v;if(['mood','energy','stress','sensory','care'].includes(f))v=+v;day[f]=day[f]===v?null:v;touch(view.date);render()},
@@ -3151,7 +3209,12 @@ function adopt(p){
   touch('settings'); renderSoon(); return twin;
 }
 return {
+  refresh(){ if(!isTyping()&&$('#modal').hidden) render(); },
   fillGaps,
+  running(){ return !!runningDay(); },
+  quickStart(){ if(runningDay()) return; if(view.preset==null) view.preset=S.settings.defaultPreset; startSprint(); },
+  quickStop(){ if(runningDay()) finishSprint(Date.now(),false); },
+  autoStart(sbId,ts){ const p=byStory(sbId); if(!p) return; const ds=todayISO(), day=dayFor(ds); if(day.start==null){ day.start=ts; touch(ds); renderSoon(); } },
   target(sbId,v){ const p=byStory(sbId); if(!p) return null; if(v!==undefined){ p.target=v; touch('settings'); renderSoon(); } return p.target||null; },
   week(ws){ let minutes=0,sprints=0,blocks=0,winter=0; const wrote=[];
     for(let i=0;i<7;i++){ const d=S.days[addDays(ws,i)]; if(!d) continue; const sp=d.sprints.filter(x=>x.end); minutes+=sp.reduce((a,x)=>a+sprintMin(x),0); sprints+=sp.length; if(sp.length) wrote.push(d.date); if(/^b[1-5]$/.test(d.block||'')) blocks++; if(d.block==='winter') winter++; }
