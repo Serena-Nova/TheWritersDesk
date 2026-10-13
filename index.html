@@ -1619,6 +1619,77 @@ async function saveFile(filename, blob){
 }
 const safeName=s=>s.replace(/[\\/:*?"<>|]+/g,'').trim()||'Story';
 
+/* ================= WORD IMPORT that keeps your green, yellow and red ================= */
+const HL_NAMES={green:'g',brightGreen:'g',darkGreen:'g',yellow:'y',darkYellow:'y',red:'r',darkRed:'r',magenta:'r',darkMagenta:'r'};
+function colourMark(hex){
+  if(!hex || !/^[0-9a-f]{6}$/i.test(hex)) return null;
+  const r=parseInt(hex.slice(0,2),16)/255, g=parseInt(hex.slice(2,4),16)/255, b=parseInt(hex.slice(4,6),16)/255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn; if(d<.12 || mx<.25) return null;
+  let h; if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4; h=(h*60+360)%360;
+  if(h<22 || h>=320) return 'r'; if(h<70) return 'y'; if(h<170) return 'g'; return null;
+}
+function parseDocxPlain(xml){
+  const W='http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+  const doc=new DOMParser().parseFromString(xml,'application/xml');
+  const at=(el,n)=>el.getAttributeNS(W,n)||el.getAttribute('w:'+n)||'';
+  const kids=el=>[...el.childNodes].filter(c=>c.nodeType===1);
+  const has=(el,name)=>kids(el).find(c=>c.localName===name);
+  const on=el=>!!el && at(el,'val')!=='0' && at(el,'val')!=='false';
+  let marks=0;
+  function runHtml(r){
+    const pr=has(r,'rPr'); let it=false,bd=false,mk=null;
+    if(pr){ it=on(has(pr,'i')); bd=on(has(pr,'b'));
+      const hl=has(pr,'highlight'); if(hl) mk=HL_NAMES[at(hl,'val')]||null;
+      if(!mk){ const sh=has(pr,'shd'); if(sh){ const f=at(sh,'fill'); if(f && f!=='auto') mk=colourMark(f); } } }
+    let s='';
+    for(const c of kids(r)){
+      if(c.localName==='t') s+=esc(c.textContent);
+      else if(c.localName==='tab') s+=' ';
+      else if((c.localName==='br' && at(c,'type')!=='page') || c.localName==='cr') s+='<br>';
+      else if(c.localName==='noBreakHyphen') s+='-';
+    }
+    if(!s) return '';
+    if(it) s='<em>'+s+'</em>'; if(bd) s='<strong>'+s+'</strong>';
+    if(mk){ marks++; s=`<mark class="${mk}">`+s+'</mark>'; }
+    return s;
+  }
+  function inline(el){
+    let s='';
+    for(const c of kids(el)){
+      const ln=c.localName;
+      if(ln==='r') s+=runHtml(c);
+      else if(ln==='del'||ln==='moveFrom') continue;
+      else if(['ins','moveTo','hyperlink','smartTag','customXml','fldSimple','sdt','sdtContent'].includes(ln)) s+=inline(c);
+    }
+    return s.replace(/<\/mark><mark class="(g|y|r)">/g,(m,c,off,str)=>{ const open=str.lastIndexOf('<mark class="',off); return str.slice(open+13,open+14)===c?'':m; });
+  }
+  const out=[];
+  function block(el){
+    for(const c of kids(el)){
+      if(c.localName==='p'){
+        const pPr=has(c,'pPr'); const st=pPr&&has(pPr,'pStyle'); const sv=st?at(st,'val'):''; const jc=pPr&&has(pPr,'jc');
+        const body=inline(c); const plain=body.replace(/<[^>]+>/g,'').replace(/&[a-z]+;/g,'x').trim();
+        if(!plain){ continue; }
+        if(/^(heading|kop|title)/i.test(sv)) out.push(`<h2>${body.replace(/<\/?mark[^>]*>/g,'')}</h2>`);
+        else if(/^[*✦#~\s]{1,}$/.test(plain) && /[*✦#~]/.test(plain)) out.push('<p class="scene">* * *</p>');
+        else out.push(`<p>${body}</p>`);
+      } else if(c.localName==='tbl'){ for(const p of c.getElementsByTagNameNS(W,'p')){ const b=inline(p); if(b.replace(/<[^>]+>/g,'').trim()) out.push(`<p>${b}</p>`); } }
+      else if(c.localName==='sdt'){ const sc=has(c,'sdtContent'); if(sc) block(sc); }
+    }
+  }
+  const body=doc.getElementsByTagNameNS(W,'body')[0]; if(body) block(body);
+  return {html:out.join(''), marks};
+}
+async function readDocx(f){
+  const buf=await f.arrayBuffer();
+  if(window.JSZip){
+    try{ const zip=await JSZip.loadAsync(buf); const x=zip.file('word/document.xml');
+      if(x){ const r=parseDocxPlain(await x.async('string')); if(r.html) return r; } }catch(e){}
+  }
+  if(window.mammoth){ const res=await mammoth.convertToHtml({arrayBuffer:buf}); return {html:cleanHtml(res.value), marks:0}; }
+  throw new Error('no reader');
+}
+
 let impTarget='first';
 function cleanHtml(html){
   const doc=new DOMParser().parseFromString('<div>'+html+'</div>','text/html');
@@ -1647,16 +1718,17 @@ function cleanHtml(html){
 }
 $('#file-docx').addEventListener('change',async e=>{
   const f=e.target.files[0]; e.target.value=''; if(!f) return;
-  if(!window.mammoth){ toast('Word import is unavailable right now: the reader did not load'); return; }
+  if(!window.mammoth && !window.JSZip){ toast('Word import is unavailable right now: the reader did not load'); return; }
   syncDom(); const p=P(), d=p.drafts.find(x=>x.id===impTarget); if(!d) return;
   const k=['first','second'].find(s=>p.slots[s]===d.id);
   if(d.html.replace(/<[^>]+>/g,'').trim() && !await ask(`${d.name} is not empty. Replace it with "${f.name}"? Make a backup first if you're unsure.`,'Replace')) return;
   try{
-    const res=await mammoth.convertToHtml({arrayBuffer:await f.arrayBuffer()});
-    d.html=cleanHtml(res.value);
+    const res=await readDocx(f);
+    d.html=res.html; d.u=Date.now(); scheduleSave();
     if(k){ eds[k].innerHTML=d.html; last[k]=words(eds[k].innerText); } // imported words don't count as written today
     refreshCounts(); scanNames(); saveNow(); renderFolio();
-    toast(`Imported into ${d.name}`);
+    toast(res.marks?`Imported into ${d.name}, with your colours`:`Imported into ${d.name}`);
+    if(k==='first' && res.marks) checkMarks();
   }catch(err){ toast('This Word file could not be read'); }
 });
 
