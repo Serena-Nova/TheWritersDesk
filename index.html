@@ -282,6 +282,10 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
 #read-views .pbtn.on{background:var(--ink);color:var(--paper)}
 .app{grid-template-columns:minmax(0,1fr)}
 .barctl{display:contents}
+.herebar{position:absolute;left:10px;width:5px;height:1.6em;border-radius:3px;background:var(--t-names);box-shadow:0 0 0 3px color-mix(in srgb,var(--t-names) 25%,transparent);pointer-events:none;transition:top .25s var(--ease);z-index:2}
+#page-first.picking .editor{cursor:crosshair}
+#page-first.picking .scroll{box-shadow:inset 0 0 0 3px color-mix(in srgb,var(--t-names) 55%,transparent);border-radius:12px}
+#here-btn.on{background:var(--t-names);color:#1c1814}
 #confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:60;display:none}
 .cheer{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 18px);transform:translate(-50%,-20px);opacity:0;z-index:61;pointer-events:none;background:var(--paper);color:var(--ink);border:2px solid var(--t-names);border-radius:22px;padding:.8rem 1.4rem;box-shadow:0 20px 50px rgba(0,0,0,.45);font:italic 500 1.12rem/1.35 var(--serif);text-align:center;max-width:calc(100% - 32px);transition:opacity .35s var(--ease),transform .45s var(--ease)}
 .cheer.show{opacity:1;transform:translate(-50%,0)}
@@ -386,11 +390,13 @@ select.pbtn{appearance:none;-webkit-appearance:none;max-width:10rem}
             <button class="dot x keep" data-mark="none" title="Remove mark (Cmd/Ctrl+0)" aria-label="Remove mark"></button>
           </span>
           <button class="pbtn keep" id="lock-first" hidden>Edit</button>
+          <button class="pbtn keep" id="here-btn" hidden title="Tap, then tap the line on the left where you are. The left page then follows your writing on the right">Here I am</button>
+          <button class="pbtn keep" id="here-stop" hidden aria-label="Stop following">×</button>
           <button class="pbtn keep" data-later-btn="first" title="Come back here later (Cmd/Ctrl+Shift+L)">Later</button>
           <button class="pbtn keep" data-addname="first" title="Add the selected name (Cmd/Ctrl+Shift+N)">Add name</button>
           <button class="pbtn keep" data-cut="first" id="cut-first" title="Move selection to your clippings (Cmd/Ctrl+Shift+K)">To clippings</button>
         </div>
-        <div class="scroll" id="scroll-first">
+        <div class="scroll" id="scroll-first"><div class="herebar" id="herebar" hidden aria-hidden="true"></div>
           <div class="editor" id="ed-first" contenteditable="true" spellcheck="true" lang="en" data-empty="Your story starts here."></div>
         </div>
         <button class="back-chip" id="back-chip" hidden>Back to where I was</button>
@@ -793,7 +799,7 @@ function applyMode(){
   if(rd) setTimeout(loadReadPdf,650);
   movePill();
   $('#marks').hidden=!rw;
-  $('#lock-first').hidden=!rw;
+  $('#lock-first').hidden=!rw; setTimeout(renderFollowUi,0);
   $('#cut-first').hidden=rw;
   firstLocked = rw;
   setFirstEditable();
@@ -846,7 +852,7 @@ function switchSlot(k,id){
   if(p.slots[other]===id) p.slots[other]=p.slots[k];
   p.slots[k]=id;
   for(const s of ['first','second']){ eds[s].innerHTML=(slotDraft(s)||{}).html||''; last[s]=words(eds[s].innerText); }
-  renderDraftSelects(); refreshCounts(); renderTabs(); scanNames(); scheduleSave(); refreshPanels(); checkMarks();
+  renderDraftSelects(); refreshCounts(); renderTabs(); scanNames(); scheduleSave(); refreshPanels(); checkMarks(); renderFollowUi();
 }
 for(const k of ['first','second']) $('#sel-'+k).addEventListener('change',e=>{
   const v=e.target.value, p=P();
@@ -1663,22 +1669,50 @@ function parseDocxPlain(xml){
     }
     return s.replace(/<\/mark><mark class="(g|y|r)">/g,(m,c,off,str)=>{ const open=str.lastIndexOf('<mark class="',off); return str.slice(open+13,open+14)===c?'':m; });
   }
-  const out=[];
+  const out=[]; let pending=true;
+  const brPage=el=>[...el.getElementsByTagNameNS(W,'br')].some(b=>at(b,'type')==='page')||el.getElementsByTagNameNS(W,'lastRenderedPageBreak').length>0&&false;
+  function textBeforeBreak(p){ let txt=false; for(const r of p.getElementsByTagNameNS(W,'r')){ for(const c of kids(r)){ if(c.localName==='t'&&c.textContent.trim()) txt=true; if(c.localName==='br'&&at(c,'type')==='page') return txt; } } return false; }
+  function looksTitle(p,pPr,plain){
+    if(plain.length>90) return false;
+    const jc=pPr&&has(pPr,'jc'); const centered=jc&&/^(center|both)$/.test(at(jc,'val'))&&at(jc,'val')==='center';
+    const ol=pPr&&has(pPr,'outlineLvl'); if(ol && +at(ol,'val')<=1) return true;
+    const rs=[...p.getElementsByTagNameNS(W,'r')].filter(r=>[...r.getElementsByTagNameNS(W,'t')].some(t=>t.textContent.trim()));
+    const big=rs.length&&rs.every(r=>{ const pr=has(r,'rPr'); const sz=pr&&has(pr,'sz'); return sz&&+at(sz,'val')>=28; });
+    const bold=rs.length&&rs.every(r=>{ const pr=has(r,'rPr'); return pr&&on(has(pr,'b')); });
+    return chRe.test(plain) || (centered && (big||bold||/^[\dIVXLC]+\.?$/i.test(plain)||plain===plain.toUpperCase()));
+  }
   function block(el){
     for(const c of kids(el)){
       if(c.localName==='p'){
-        const pPr=has(c,'pPr'); const st=pPr&&has(pPr,'pStyle'); const sv=st?at(st,'val'):''; const jc=pPr&&has(pPr,'jc');
+        const pPr=has(c,'pPr'); const st=pPr&&has(pPr,'pStyle'); const sv=st?at(st,'val'):'';
+        if(pPr&&on(has(pPr,'pageBreakBefore'))) pending=true;
+        const hasBr=brPage(c); const brFirst=hasBr&&!textBeforeBreak(c);
+        if(brFirst) pending=true;
         const body=inline(c); const plain=body.replace(/<[^>]+>/g,'').replace(/&[a-z]+;/g,'x').trim();
-        if(!plain){ continue; }
-        if(/^(heading|kop|title)/i.test(sv)) out.push(`<h2>${body.replace(/<\/?mark[^>]*>/g,'')}</h2>`);
-        else if(/^[*✦#~\s]{1,}$/.test(plain) && /[*✦#~]/.test(plain)) out.push('<p class="scene">* * *</p>');
-        else out.push(`<p>${body}</p>`);
-      } else if(c.localName==='tbl'){ for(const p of c.getElementsByTagNameNS(W,'p')){ const b=inline(p); if(b.replace(/<[^>]+>/g,'').trim()) out.push(`<p>${b}</p>`); } }
+        if(!plain && out.length && out[out.length-1]!=='GAP') out.push('GAP');
+        if(plain){
+          if(/^(heading|kop|title)/i.test(sv) || ((pending||out.length===0) && looksTitle(c,pPr,plain)) || (!pending && looksTitle(c,pPr,plain) && chRe.test(plain))) out.push(`<h2>${body.replace(/<\/?(mark|strong)[^>]*>/g,'')}</h2>`);
+          else if(/^[*✦#~\s]{1,}$/.test(plain) && /[*✦#~]/.test(plain)) out.push('<p class="scene">* * *</p>');
+          else { if(pending && out.length && !/^<h2/.test(out[out.length-1])) out.push('<p class="scene">* * *</p>'); out.push(`<p>${body}</p>`); }
+          pending=false;
+        }
+        if(hasBr&&!brFirst) pending=true;
+        if(pPr&&has(pPr,'sectPr')) pending=true;
+      } else if(c.localName==='tbl'){ for(const p of c.getElementsByTagNameNS(W,'p')){ const b=inline(p); if(b.replace(/<[^>]+>/g,'').trim()) out.push(`<p>${b}</p>`); } pending=false; }
       else if(c.localName==='sdt'){ const sc=has(c,'sdtContent'); if(sc) block(sc); }
     }
   }
   const body=doc.getElementsByTagNameNS(W,'body')[0]; if(body) block(body);
-  return {html:out.join(''), marks};
+  const texts=out.filter(x=>/^<p>/.test(x)).length;
+  const between=(i)=>{ const prev=out.slice(0,i).reverse().find(y=>y!=='GAP'), next=out.slice(i+1).find(y=>y!=='GAP'); return !!(prev&&next&&/^<p>/.test(prev)&&/^<p>/.test(next)); };
+  const gaps=out.filter((x,i)=>x==='GAP'&&between(i)).length;
+  const asScene=gaps>0 && gaps<=texts*0.3;
+  const fin=[]; out.forEach((x,i)=>{
+    if(x!=='GAP'){ fin.push(x); return; }
+    const prev=fin[fin.length-1], next=out.slice(i+1).find(y=>y!=='GAP');
+    if(asScene && prev && next && /^<p>/.test(prev) && /^<p>/.test(next)) fin.push('<p class="scene">* * *</p>');
+  });
+  return {html:fin.join(''), marks};
 }
 async function readDocx(f){
   const buf=await f.arrayBuffer();
@@ -3339,6 +3373,67 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 
 /* ================= offline: keep the app on this device (own website only) ================= */
 if(DBX_OK && 'serviceWorker' in navigator){ window.addEventListener('load',()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); }); }
+
+/* ================= HERE I AM: the left page follows from the spot you choose ================= */
+let pickRef=null, picking=false, folRaf=null, folBusy=false;
+const FOL=()=>{ const p=P(); const f=p&&p.follow; return (f&&f.on&&p.mode==='rewrite'&&f.ld===p.slots.first&&f.rd===p.slots.second)?f:null; };
+function offAt(ed,node,off){ const r=document.createRange(); r.selectNodeContents(ed); try{ r.setEnd(node,off); }catch(e){ return 0; } return r.toString().length; }
+function rangeAtOff(ed,off){
+  const tw=document.createTreeWalker(ed,NodeFilter.SHOW_TEXT); let n, acc=0, last=null;
+  while((n=tw.nextNode())){ const L=n.nodeValue.length; if(acc+L>=off){ const r=document.createRange(); r.setStart(n,Math.max(0,off-acc)); r.collapse(true); return r; } acc+=L; last=n; }
+  if(last){ const r=document.createRange(); r.setStart(last,last.nodeValue.length); r.collapse(true); return r; }
+  return null;
+}
+function contentY(k,r){
+  if(!r) return 0; let rect=r.getClientRects()[0];
+  if(!rect){ let el=r.startContainer; if(el.nodeType===3) el=el.parentElement; rect=el&&el.getBoundingClientRect(); }
+  if(!rect) return 0; const sc=scrolls[k]; return rect.top-sc.getBoundingClientRect().top+sc.scrollTop;
+}
+function pointRange(x,y){
+  if(document.caretRangeFromPoint) return document.caretRangeFromPoint(x,y);
+  if(document.caretPositionFromPoint){ const p=document.caretPositionFromPoint(x,y); if(!p) return null; const r=document.createRange(); r.setStart(p.offsetNode,p.offset); r.collapse(true); return r; }
+  return null;
+}
+function rightRef(){
+  const sc=scrolls.second, box=sc.getBoundingClientRect(), s=getSelection();
+  if(s.rangeCount && eds.second.contains(s.anchorNode)){
+    const r=s.getRangeAt(0).cloneRange(); r.collapse(false); const y=contentY('second',r);
+    if(y>=sc.scrollTop && y<=sc.scrollTop+sc.clientHeight) return {off:offAt(eds.second,r.endContainer,r.endOffset), y};
+  }
+  const r=pointRange(box.left+box.width/2, box.top+box.height*0.4);
+  if(r && eds.second.contains(r.startContainer)) return {off:offAt(eds.second,r.startContainer,r.startOffset), y:contentY('second',r)};
+  return {off:0, y:sc.scrollTop+sc.clientHeight*0.4};
+}
+function placeBar(y){ const b=$('#herebar'); if(!b) return; if(y==null){ b.hidden=true; return; } b.hidden=false; b.style.top=(y)+'px'; }
+function doFollow(){
+  const f=FOL(); if(!f){ placeBar(null); return; }
+  const ref=rightRef();
+  const ly=contentY('first',rangeAtOff(eds.first,f.l)), ry=contentY('second',rangeAtOff(eds.second,f.r));
+  const target=ly+(ref.y-ry), view=ref.y-scrolls.second.scrollTop;
+  folBusy=true; scrolls.first.scrollTo({top:Math.max(0,target-view), behavior:'auto'}); placeBar(target);
+  setTimeout(()=>{ folBusy=false; },60);
+}
+const followSoon=()=>{ if(!FOL()) return; cancelAnimationFrame(folRaf); folRaf=requestAnimationFrame(doFollow); };
+['input','keyup','click'].forEach(ev=>eds.second.addEventListener(ev,followSoon));
+scrolls.second.addEventListener('scroll',followSoon,{passive:true});
+window.addEventListener('resize',followSoon);
+function setPicking(on){ picking=on; pickRef=on?rightRef():null; $('#here-btn').classList.toggle('on',on); $('#page-first').classList.toggle('picking',on); if(on) toast('Tap the line on the left where you are'); }
+function renderFollowUi(){
+  const p=P(), rw=p&&p.mode==='rewrite', f=FOL();
+  $('#here-btn').hidden=!rw; $('#here-stop').hidden=!(rw&&f);
+  $('#here-btn').textContent=f?'Here I am ✓':'Here I am';
+  if(!f) placeBar(null); else followSoon();
+}
+$('#here-btn').onclick=()=>setPicking(!picking);
+$('#here-stop').onclick=()=>{ const p=P(); if(p.follow) p.follow.on=false; scheduleSave(); renderFollowUi(); toast('The left page scrolls on its own again'); };
+scrolls.first.addEventListener('click',e=>{
+  if(!picking) return; e.preventDefault(); e.stopPropagation();
+  const r=pointRange(e.clientX,e.clientY); if(!r || !eds.first.contains(r.startContainer)){ toast('Tap on a line of text'); return; }
+  const rr=pickRef||rightRef(); const p=P();
+  p.follow={on:true, l:offAt(eds.first,r.startContainer,r.startOffset), r:rr.off, ld:p.slots.first, rd:p.slots.second};
+  setPicking(false); scheduleSave(); renderFollowUi();
+  toast('Got it. The left page now follows your writing from here');
+},true);
 
 /* ---------------- start ---------------- */
 (async function start(){
